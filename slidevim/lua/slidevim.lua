@@ -162,7 +162,7 @@ local function parse_slides_from_lines(lines, skip_src_directives)
         if is_src_directive(lines[j]) then
           is_src_block = true
         end
-        
+
         -- Scan forward to find the closing separator
         while j <= n do
           if is_separator(lines[j]) then
@@ -649,9 +649,38 @@ local function schedule_autosave(bufnr)
   end
 
   autosave_timer = vim.loop.new_timer()
-  autosave_timer:start(M.config.debounce_ms, 0, vim.schedule_wrap(function()
-    autosave_buffer(bufnr)
-  end))
+  autosave_timer:start(
+    M.config.debounce_ms,
+    0,
+    vim.schedule_wrap(function()
+      autosave_buffer(bufnr)
+    end)
+  )
+end
+
+local function compact_job_output(lines)
+  local output = {}
+
+  for _, line in ipairs(lines) do
+    if line ~= '' then
+      table.insert(output, line)
+    end
+  end
+
+  return table.concat(output, '\n')
+end
+
+local function notify_server_exit(code, stderr_lines)
+  local stderr = compact_job_output(stderr_lines)
+  local message = 'Slidevim: Bridge failed to start or exited with code ' .. code .. '.'
+
+  if stderr ~= '' then
+    message = message .. '\n\n' .. stderr
+  end
+
+  message = message .. '\n\nCommand: uv run slidevim/python/server.py\nThe Chrome extension connects to the bridge on 127.0.0.1:8765.'
+
+  vim.notify(message, vim.log.levels.ERROR)
 end
 
 -- Start Python WebSocket server with uv
@@ -661,13 +690,8 @@ function M.start()
     return
   end
 
-  -- Check if uv is available
-  if vim.fn.executable 'uv' == 0 then
-    vim.notify('Slidevim: uv not found, please install it: https://docs.astral.sh/uv/', vim.log.levels.ERROR)
-    return
-  end
-
   local server_py = M.config.plugin_dir .. '/python/server.py'
+  local stderr_lines = {}
 
   -- Start the Python server with uv run (handles deps automatically)
   server_job = vim.fn.jobstart({ 'uv', 'run', server_py }, {
@@ -684,7 +708,7 @@ function M.start()
       if data and #data > 0 then
         for _, line in ipairs(data) do
           if line ~= '' then
-            vim.notify(line, vim.log.levels.WARN)
+            table.insert(stderr_lines, line)
           end
         end
       end
@@ -693,10 +717,16 @@ function M.start()
       server_job = nil
       close_tcp_client()
       if code ~= 0 then
-        vim.notify('Slidevim: Server exited with code ' .. code, vim.log.levels.ERROR)
+        notify_server_exit(code, stderr_lines)
       end
     end,
   })
+
+  if server_job <= 0 then
+    server_job = nil
+    vim.notify('Slidevim: Failed to launch bridge process with `uv run ' .. server_py .. '`.', vim.log.levels.ERROR)
+    return
+  end
 
   -- Give server a moment to start, then connect
   vim.defer_fn(function()

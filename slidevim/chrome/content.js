@@ -4,7 +4,7 @@
 (function() {
   'use strict';
 
-  const WS_URL = 'ws://localhost:8765';
+  const WS_URL = 'ws://127.0.0.1:8765';
   let ws = null;
   let reconnectTimer = null;
   let reconnectDelay = 1000;
