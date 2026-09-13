@@ -22,16 +22,38 @@ local autosave_timer = nil
 local last_sent_slide = nil
 local last_slide_winid = nil
 
--- Check if a buffer is in the configured slides directory
-local function is_slides_buffer(bufnr)
-  local path
-  if bufnr then
-    path = vim.api.nvim_buf_get_name(bufnr)
-  else
-    path = vim.fn.expand '%:p'
+-- Marp decks can also live in a slides directory, but Slidevim only supports Slidev.
+local function is_marp_buffer(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return false
   end
 
-  return path ~= '' and path:find(M.config.slides_dir_pattern) ~= nil
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, 100, false)
+  if not lines[1] or not lines[1]:match '^%s*%-%-%-%s*$' then
+    return false
+  end
+
+  for i = 2, #lines do
+    if lines[i]:match '^%s*%-%-%-%s*$' then
+      break
+    end
+
+    local value = lines[i]:match '^%s*marp%s*:%s*([^%s#]+)'
+    if value and value:lower() == 'true' then
+      return true
+    end
+  end
+
+  return false
+end
+
+-- Check if a buffer is a Slidev candidate in the configured slides directory.
+local function is_slides_buffer(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local path = vim.api.nvim_buf_get_name(bufnr)
+
+  return path ~= '' and path:find(M.config.slides_dir_pattern) ~= nil and not is_marp_buffer(bufnr)
 end
 
 local function remember_slide_window()
@@ -820,6 +842,7 @@ M._debug = {
   count_slides_in_file = count_slides_in_file,
   build_deck_index = build_deck_index,
   detect_slides = detect_slides,
+  is_marp_buffer = is_marp_buffer,
 }
 
 return M
